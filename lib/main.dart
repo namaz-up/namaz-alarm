@@ -214,7 +214,8 @@ class _HomePageState extends State<HomePage> {
     if (desc == null) return null;
     final rotation = InputImageRotationValue.fromRawValue(desc.sensorOrientation);
     final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    if (rotation == null || format != InputImageFormat.nv21) return null;
+    if (rotation == null || format == null) return null;
+    if (format != InputImageFormat.nv21) return null;
     if (image.planes.length != 1) return null;
     final plane = image.planes.first;
     return InputImage.fromBytes(
