@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:adhan/adhan.dart';
 import 'package:alarm/alarm.dart';
 import 'package:camera/camera.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -22,11 +25,11 @@ Future<void> main() async {
       debugShowCheckedModeBanner: false, home: HomePage()));
 }
 
-AlarmSettings buildSettings(int id, DateTime time) {
+AlarmSettings buildSettings(int id, DateTime time, String? sound) {
   return AlarmSettings(
     id: id,
     dateTime: time,
-    assetAudioPath: 'assets/drum.wav',
+    assetAudioPath: sound ?? 'assets/drum.wav',
     loopAudio: true,
     vibrate: true,
     warningNotificationOnKill: false,
@@ -41,12 +44,21 @@ AlarmSettings buildSettings(int id, DateTime time) {
   );
 }
 
+// Returns the saved custom sound path, or null to use the default drum.
+Future<String?> savedSound() async {
+  final sp = await SharedPreferences.getInstance();
+  final path = sp.getString('sound');
+  if (path != null && File(path).existsSync()) return path;
+  return null;
+}
+
 // Sets alarms for the next 7 days. Opening the app again refreshes them.
 Future<String> scheduleFajr() async {
   final sp = await SharedPreferences.getInstance();
   final lat = sp.getDouble('lat');
   final lng = sp.getDouble('lng');
   if (lat == null || lng == null) return 'Location not saved yet.';
+  final sound = await savedSound();
   final params = CalculationMethod.karachi.getParameters();
   final now = DateTime.now();
   DateTime? first;
@@ -56,7 +68,7 @@ Future<String> scheduleFajr() async {
         Coordinates(lat, lng), DateComponents.from(day), params);
     final fajr = times.fajr.toLocal();
     if (fajr.isAfter(now)) {
-      await Alarm.set(alarmSettings: buildSettings(100 + i, fajr));
+      await Alarm.set(alarmSettings: buildSettings(100 + i, fajr, sound));
       first ??= fajr;
     }
   }
@@ -78,10 +90,14 @@ class _HomePageState extends State<HomePage> {
   String info = 'Press the first button to start.';
   StreamSubscription? sub;
   final detector = FaceDetector(
-      options: FaceDetectorOptions(enableClassification: true));
+      options: FaceDetectorOptions(
+          enableClassification: true,
+          performanceMode: FaceDetectorMode.accurate));
   CameraController? cam;
   Timer? timer;
   bool busy = false;
+  String status = 'Looking for your face...';
+  String soundName = 'Drum (default)';
 
   @override
   void initState() {
@@ -91,6 +107,45 @@ class _HomePageState extends State<HomePage> {
       ringingId = alarmSet.alarms.first.id;
       beginVerification();
     });
+    loadSoundName();
+  }
+
+  Future<void> loadSoundName() async {
+    final sp = await SharedPreferences.getInstance();
+    final path = await savedSound();
+    if (mounted) {
+      setState(() => soundName =
+          path == null ? 'Drum (default)' : (sp.getString('soundName') ?? 'My sound'));
+    }
+  }
+
+  Future<void> pickSound() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.audio);
+      if (result == null || result.files.single.path == null) return;
+      final name = result.files.single.name;
+      final safe = name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+      final dir = await getApplicationDocumentsDirectory();
+      final dest = await File(result.files.single.path!)
+          .copy('${dir.path}/alarm_sound_$safe');
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('sound', dest.path);
+      await sp.setString('soundName', name);
+      final msg = await scheduleFajr();
+      await loadSoundName();
+      if (mounted) setState(() => info = 'Sound saved: $name. $msg');
+    } catch (e) {
+      if (mounted) setState(() => info = 'Could not use that file: $e');
+    }
+  }
+
+  Future<void> useDefaultSound() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove('sound');
+    await sp.remove('soundName');
+    final msg = await scheduleFajr();
+    await loadSoundName();
+    if (mounted) setState(() => info = 'Using the drum sound. $msg');
   }
 
   Future<void> setup() async {
@@ -117,9 +172,10 @@ class _HomePageState extends State<HomePage> {
   Future<void> testAlarm() async {
     await Permission.notification.request();
     await Permission.scheduleExactAlarm.request();
+    final sound = await savedSound();
     await Alarm.set(
-        alarmSettings: buildSettings(
-            testAlarmId, DateTime.now().add(const Duration(seconds: 15))));
+        alarmSettings: buildSettings(testAlarmId,
+            DateTime.now().add(const Duration(seconds: 15)), sound));
     if (mounted) setState(() => info = 'Test alarm will ring in 15 seconds.');
   }
 
@@ -142,6 +198,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void setStatus(String t) {
+    if (mounted) setState(() => status = t);
+  }
+
   // Face must be visible and smiling, so a sleeping face fails.
   Future<void> checkFace() async {
     if (busy || cam == null || !cam!.value.isInitialized) return;
@@ -150,14 +210,23 @@ class _HomePageState extends State<HomePage> {
       final pic = await cam!.takePicture();
       final faces =
           await detector.processImage(InputImage.fromFilePath(pic.path));
-      if (faces.isNotEmpty && (faces.first.smilingProbability ?? 0) > 0.7) {
-        timer?.cancel();
-        final c = cam;
-        cam = null;
-        if (mounted) setState(() => step = 2);
-        await c?.dispose();
+      if (faces.isEmpty) {
+        setStatus('No face found. Hold the phone in front of your face, in light.');
+      } else {
+        final p = faces.first.smilingProbability ?? 0;
+        if (p > 0.5) {
+          timer?.cancel();
+          final c = cam;
+          cam = null;
+          if (mounted) setState(() => step = 2);
+          await c?.dispose();
+        } else {
+          setStatus('Face found. Smile bigger! (${(p * 100).round()}%)');
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      setStatus('Camera problem: $e');
+    }
     busy = false;
   }
 
@@ -223,6 +292,16 @@ class _HomePageState extends State<HomePage> {
       const SizedBox(height: 12),
       OutlinedButton(
           onPressed: testAlarm, child: const Text('2. Test alarm (15 seconds)')),
+      const SizedBox(height: 12),
+      OutlinedButton(
+          onPressed: pickSound,
+          child: const Text('3. Choose my own alarm sound from phone')),
+      Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text('Current sound: $soundName')),
+      TextButton(
+          onPressed: useDefaultSound,
+          child: const Text('Use the default drum sound')),
       const SizedBox(height: 20),
       const Text(
           'Washroom QR code text:\n$washroomCode\n\nOpen this app once every few days so alarms stay set.'),
@@ -238,6 +317,10 @@ class _HomePageState extends State<HomePage> {
                   ? 'Look at the camera and smile ðŸ˜Š'
                   : 'Go to the washroom tap and scan the QR code ðŸ’§',
               style: const TextStyle(fontSize: 22))),
+      if (step == 1)
+        Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(status, textAlign: TextAlign.center)),
       Expanded(
           child: step == 1
               ? (cam != null && cam!.value.isInitialized
