@@ -1,0 +1,77 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Make android project files
+        run: |
+          mkdir tmp_app
+          cd tmp_app
+          flutter create --platforms=android --org com.namaz --project-name namaz_alarm .
+          cd ..
+          cp -r tmp_app/android ./android
+          rm -rf tmp_app
+          cp manifest/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 26/' android/app/build.gradle.kts || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 26/' android/app/build.gradle || true
+
+      - name: Make drum sound
+        run: |
+          mkdir -p assets
+          python3 - <<'PY'
+          import wave, struct, math, random
+          sr = 22050
+          n = int(sr * 4.0)
+          data = [0.0] * n
+          hits = [0.0, 0.5, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 3.25, 3.5]
+          for t0 in hits:
+              s = int(t0 * sr)
+              phase = 0.0
+              for i in range(int(0.45 * sr)):
+                  if s + i >= n:
+                      break
+                  t = i / sr
+                  f = 45 + 130 * math.exp(-t * 9)
+                  phase += 2 * math.pi * f / sr
+                  data[s + i] += math.sin(phase) * math.exp(-t * 6) * 0.9
+                  data[s + i] += random.uniform(-1, 1) * math.exp(-t * 40) * 0.4
+          w = wave.open('assets/drum.wav', 'wb')
+          w.setnchannels(1)
+          w.setsampwidth(2)
+          w.setframerate(sr)
+          for x in data:
+              x = max(-1.0, min(1.0, x))
+              w.writeframes(struct.pack('<h', int(x * 32000)))
+          w.close()
+          PY
+
+      - run: flutter pub get
+
+      - run: flutter build apk --release
+
+      - name: Publish APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Namaz Alarm APK ${{ github.run_number }}
+          files: build/app/outputs/flutter-apk/app-release.apk
