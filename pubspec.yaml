@@ -1,0 +1,24 @@
+name: namaz_alarm
+description: Fajr wake up alarm that stops only after face scan and washroom QR scan.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  alarm: 4.1.1
+  adhan: ^2.0.0
+  camera: ^0.11.0
+  google_mlkit_face_detection: ^0.11.0
+  mobile_scanner: ^5.2.3
+  geolocator: ^13.0.1
+  permission_handler: ^11.3.1
+  shared_preferences: ^2.3.2
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/drum.wav
