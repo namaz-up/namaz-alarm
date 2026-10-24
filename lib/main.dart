@@ -6,6 +6,7 @@ import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
@@ -95,6 +96,7 @@ class _HomePageState extends State<HomePage> {
           performanceMode: FaceDetectorMode.accurate));
   CameraController? cam;
   Timer? timer;
+  CameraDescription? camDesc;
   bool busy = false;
   String status = 'Looking for your face...';
   String soundName = 'Drum (default)';
@@ -181,19 +183,24 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> beginVerification() async {
     if (step != 0) return;
-    setState(() => step = 1);
+    setState(() {
+      step = 1;
+      status = 'Looking for your face...';
+    });
     try {
       final cams = await availableCameras();
       final front = cams.firstWhere(
           (c) => c.lensDirection == CameraLensDirection.front,
           orElse: () => cams.first);
+      camDesc = front;
       cam = CameraController(front, ResolutionPreset.medium,
-          enableAudio: false);
+          enableAudio: false, imageFormatGroup: ImageFormatGroup.nv21);
       await cam!.initialize();
       if (!mounted) return;
       setState(() {});
-      timer = Timer.periodic(const Duration(seconds: 1), (_) => checkFace());
+      await cam!.startImageStream(onFrame);
     } catch (e) {
+      // Camera failed: go to the QR step so you are never stuck.
       if (mounted) setState(() => step = 2);
     }
   }
@@ -202,31 +209,56 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() => status = t);
   }
 
-  // Face must be visible and smiling, so a sleeping face fails.
-  Future<void> checkFace() async {
-    if (busy || cam == null || !cam!.value.isInitialized) return;
+  InputImage? toInputImage(CameraImage image) {
+    final desc = camDesc;
+    if (desc == null) return null;
+    final rotation = InputImageRotationValue.fromRawValue(desc.sensorOrientation);
+    final format = InputImageFormatValue.fromRawValue(image.format.raw);
+    if (rotation == null || format != InputImageFormat.nv21) return null;
+    if (image.planes.length != 1) return null;
+    final plane = image.planes.first;
+    return InputImage.fromBytes(
+      bytes: plane.bytes,
+      metadata: InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation: rotation,
+        format: format,
+        bytesPerRow: plane.bytesPerRow,
+      ),
+    );
+  }
+
+  // Runs on every camera frame. Face must be visible and smiling.
+  Future<void> onFrame(CameraImage image) async {
+    if (busy || step != 1) return;
     busy = true;
     try {
-      final pic = await cam!.takePicture();
-      final faces =
-          await detector.processImage(InputImage.fromFilePath(pic.path));
-      if (faces.isEmpty) {
-        setStatus('No face found. Hold the phone in front of your face, in light.');
+      final input = toInputImage(image);
+      if (input == null) {
+        setStatus('Camera picture format not supported on this phone.');
       } else {
-        final p = faces.first.smilingProbability ?? 0;
-        if (p > 0.5) {
-          timer?.cancel();
-          final c = cam;
-          cam = null;
-          if (mounted) setState(() => step = 2);
-          await c?.dispose();
+        final faces = await detector.processImage(input);
+        if (faces.isEmpty) {
+          setStatus('No face found. Hold the phone in front of your face, in light.');
         } else {
-          setStatus('Face found. Smile bigger! (${(p * 100).round()}%)');
+          final p = faces.first.smilingProbability ?? 0;
+          if (p > 0.5) {
+            final c = cam;
+            cam = null;
+            if (mounted) setState(() => step = 2);
+            try {
+              await c?.stopImageStream();
+            } catch (_) {}
+            await c?.dispose();
+          } else {
+            setStatus('Face found. Smile bigger! (${(p * 100).round()}%)');
+          }
         }
       }
     } catch (e) {
-      setStatus('Camera problem: $e');
+      setStatus('Face check problem: $e');
     }
+    await Future.delayed(const Duration(milliseconds: 300));
     busy = false;
   }
 
@@ -240,6 +272,9 @@ class _HomePageState extends State<HomePage> {
     timer?.cancel();
     final c = cam;
     cam = null;
+    try {
+      await c?.stopImageStream();
+    } catch (_) {}
     await c?.dispose();
     if (ringingId != null) {
       await Alarm.stop(ringingId!);
@@ -314,8 +349,8 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(16),
           child: Text(
               step == 1
-                  ? 'Look at the camera and smile ðŸ˜Š'
-                  : 'Go to the washroom tap and scan the QR code ðŸ’§',
+                  ? 'Look at the camera and smile'
+                  : 'Go to the washroom tap and scan the QR code',
               style: const TextStyle(fontSize: 22))),
       if (step == 1)
         Padding(
