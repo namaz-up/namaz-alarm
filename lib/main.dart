@@ -29,11 +29,15 @@ AlarmSettings buildSettings(int id, DateTime time) {
     assetAudioPath: 'assets/drum.wav',
     loopAudio: true,
     vibrate: true,
-    volume: 1.0,
-    notificationTitle: 'Fajr time',
-    notificationBody: 'Wake up for namaz',
-    enableNotificationOnKill: true,
+    warningNotificationOnKill: false,
     androidFullScreenIntent: true,
+    androidStopAlarmOnTermination: false,
+    volumeSettings: VolumeSettings.fixed(volume: 1.0, volumeEnforced: true),
+    notificationSettings: const NotificationSettings(
+      title: 'Fajr time',
+      body: 'Wake up for namaz',
+      androidStopAlarmOnDismiss: false,
+    ),
   );
 }
 
@@ -82,8 +86,9 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    sub = Alarm.ringStream.stream.listen((settings) {
-      ringingId = settings.id;
+    sub = Alarm.ringing.listen((alarmSet) {
+      if (alarmSet.alarms.isEmpty) return;
+      ringingId = alarmSet.alarms.first.id;
       beginVerification();
     });
   }
@@ -230,8 +235,8 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(16),
           child: Text(
               step == 1
-                  ? 'Look at the camera and smile 😊'
-                  : 'Go to the washroom tap and scan the QR code 💧',
+                  ? 'Look at the camera and smile ðŸ˜Š'
+                  : 'Go to the washroom tap and scan the QR code ðŸ’§',
               style: const TextStyle(fontSize: 22))),
       Expanded(
           child: step == 1
