@@ -1,20 +1,19 @@
 import 'dart:io';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
-const Color _green = Color(0xFF075442);
-const Color _darkGreen = Color(0xFF063C32);
+const Color green = Color(0xFF075442);
+const Color darkGreen = Color(0xFF063C32);
+const Color gold = Color(0xFFC5A04A);
+const Color cream = Color(0xFFFFFCF4);
 
+const String defaultWashroomQr = 'NAMAZ-ALARM-WASHROOM-001';
+
+// LIVE SELFIE SCREEN
 class RealFaceDetectionScreen extends StatefulWidget {
   final bool continueToQr;
 
@@ -31,251 +30,271 @@ class RealFaceDetectionScreen extends StatefulWidget {
 class _RealFaceDetectionScreenState
     extends State<RealFaceDetectionScreen> {
   CameraController? _camera;
-  FaceDetector? _detector;
-
-  bool _initializing = true;
-  bool _processing = false;
-  bool _completed = false;
+  XFile? _selfie;
+  bool _loading = true;
+  bool _takingPhoto = false;
   String? _error;
-
-  String _message = 'Position your face inside the camera view.';
 
   @override
   void initState() {
     super.initState();
-    _initializeCamera();
+    _startCamera();
   }
 
-  Future<void> _initializeCamera() async {
+  Future<void> _startCamera() async {
     try {
       final cameras = await availableCameras();
 
       if (cameras.isEmpty) {
-        throw Exception('No camera found.');
+        throw Exception('No camera found on this device.');
       }
 
-      final frontCameras = cameras
-          .where(
-            (camera) =>
-                camera.lensDirection == CameraLensDirection.front,
-          )
-          .toList();
+      CameraDescription selectedCamera = cameras.first;
 
-      final selectedCamera =
-          frontCameras.isNotEmpty ? frontCameras.first : cameras.first;
+      for (final camera in cameras) {
+        if (camera.lensDirection == CameraLensDirection.front) {
+          selectedCamera = camera;
+          break;
+        }
+      }
 
       final controller = CameraController(
         selectedCamera,
         ResolutionPreset.medium,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.nv21,
       );
 
       await controller.initialize();
 
-      final detector = FaceDetector(
-        options: FaceDetectorOptions(
-          performanceMode: FaceDetectorMode.fast,
-          enableLandmarks: false,
-          enableContours: false,
-          enableClassification: false,
-          minFaceSize: 0.10,
-        ),
-      );
-
       if (!mounted) {
         await controller.dispose();
-        await detector.close();
         return;
       }
 
-      _camera = controller;
-      _detector = detector;
-
-      await controller.startImageStream(_processCameraImage);
-
-      if (!mounted) return;
-
       setState(() {
-        _initializing = false;
-        _message = 'Looking for your face...';
+        _camera = controller;
+        _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
-        _initializing = false;
-        _error = 'Could not start face detection. '
-            'Check camera permission and try again.\n$e';
+        _loading = false;
+        _error = 'Unable to open the camera. Please check camera permission.';
       });
     }
   }
 
-  Future<void> _processCameraImage(CameraImage image) async {
-    if (_processing || _completed || _detector == null || _camera == null) {
+  Future<void> _takeSelfie() async {
+    if (_camera == null ||
+        !_camera!.value.isInitialized ||
+        _takingPhoto) {
       return;
     }
 
-    _processing = true;
+    setState(() {
+      _takingPhoto = true;
+    });
 
     try {
-      final camera = _camera!;
-      final rotation = InputImageRotationValue.fromRawValue(
-        camera.description.sensorOrientation,
-      );
+      final photo = await _camera!.takePicture();
 
-      if (rotation == null) return;
+      if (!mounted) return;
 
-      final format = InputImageFormatValue.fromRawValue(image.format.raw);
-
-      if (format == null) return;
-
-      final WriteBuffer buffer = WriteBuffer();
-
-      for (final plane in image.planes) {
-        buffer.putUint8List(plane.bytes);
-      }
-
-      final bytes = buffer.done().buffer.asUint8List();
-
-      final inputImage = InputImage.fromBytes(
-        bytes: bytes,
-        metadata: InputImageMetadata(
-          size: Size(
-            image.width.toDouble(),
-            image.height.toDouble(),
-          ),
-          rotation: rotation,
-          format: format,
-          bytesPerRow: image.planes.first.bytesPerRow,
-        ),
-      );
-
-      final faces = await _detector!.processImage(inputImage);
-
-      if (!mounted || _completed) return;
-
-      if (faces.isNotEmpty) {
-        _completed = true;
-
-        setState(() {
-          _message = 'Face detected successfully!';
-        });
-
-        await _camera!.stopImageStream();
-
-        if (!mounted) return;
-
-        if (widget.continueToQr) {
-          await Future.delayed(const Duration(milliseconds: 500));
-
-          if (!mounted) return;
-
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const WashroomQrScannerScreen(),
-            ),
-          );
-
-          if (!mounted) return;
-
-          Navigator.of(context).pop(true);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Face detected successfully.')),
-          );
-        }
-      } else {
-        setState(() {
-          _message = 'Looking for your face...';
-        });
-      }
+      setState(() {
+        _selfie = photo;
+        _takingPhoto = false;
+      });
     } catch (e) {
-      // Continue trying on subsequent camera frames.
-    } finally {
-      _processing = false;
+      if (!mounted) return;
+
+      setState(() {
+        _takingPhoto = false;
+        _error = 'Could not capture the selfie. Please try again.';
+      });
     }
+  }
+
+  Future<void> _retakeSelfie() async {
+    setState(() {
+      _selfie = null;
+      _error = null;
+    });
+  }
+
+  Future<void> _continueToQr() async {
+    if (_selfie == null) return;
+
+    if (!widget.continueToQr) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Live selfie captured successfully.')),
+        );
+      }
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const WashroomQrScannerScreen(),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _camera?.dispose();
-    _detector?.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Automatic Face Detection')),
+      backgroundColor: cream,
+      appBar: AppBar(
+        title: const Text('Live Selfie'),
+        backgroundColor: cream,
+      ),
       body: SafeArea(
-        child: _initializing
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(
-                        _error!,
-                        textAlign: TextAlign.center,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            children: [
+              const Text(
+                'Wake Up Challenge',
+                style: TextStyle(
+                  fontSize: 25,
+                  fontWeight: FontWeight.bold,
+                  color: darkGreen,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Take a selfie using your front camera to continue.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 15),
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: Container(
+                    width: double.infinity,
+                    color: Colors.black,
+                    child: _loading
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                              color: gold,
+                            ),
+                          )
+                        : _error != null
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(20),
+                                  child: Text(
+                                    _error!,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : _selfie != null
+                                ? Image.file(
+                                    File(_selfie!.path),
+                                    fit: BoxFit.contain,
+                                  )
+                                : _camera != null
+                                    ? CameraPreview(_camera!)
+                                    : const Center(
+                                        child: Text(
+                                          'Camera unavailable',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              if (_selfie == null)
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton.icon(
+                    onPressed:
+                        _loading || _takingPhoto || _error != null
+                            ? null
+                            : _takeSelfie,
+                    icon: const Icon(Icons.camera_alt),
+                    label: Text(
+                      _takingPhoto ? 'Capturing...' : 'Take Live Selfie',
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                )
+              else ...[
+                const Text(
+                  'Selfie captured!',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: green,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _retakeSelfie,
+                        child: const Text('Retake'),
                       ),
                     ),
-                  )
-                : ListView(
-                    padding: const EdgeInsets.all(20),
-                    children: [
-                      Container(
-                        height: 380,
-                        clipBehavior: Clip.antiAlias,
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: _continueToQr,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: green,
+                          foregroundColor: Colors.white,
                         ),
-                        child: _camera != null &&
-                                _camera!.value.isInitialized
-                            ? CameraPreview(_camera!)
-                            : const Center(
-                                child: Text(
-                                  'Camera unavailable',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ),
-                      ),
-                      const SizedBox(height: 24),
-                      Icon(
-                        _completed ? Icons.check_circle : Icons.face,
-                        size: 54,
-                        color: _green,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        _message,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                        child: Text(
+                          widget.continueToQr ? 'Scan QR' : 'Finish',
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Keep your face clearly visible in the camera. '
-                        'Detection happens automatically. This checks '
-                        'for a face; it does not verify identity or '
-                        'prove that a live person is present.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.black54,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _error = null;
+                      _loading = true;
+                    });
+                    _startCamera();
+                  },
+                  child: const Text('Try Again'),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
+// WASHROOM QR GENERATOR
 class WashroomQrGeneratorScreen extends StatefulWidget {
   const WashroomQrGeneratorScreen({super.key});
 
@@ -287,96 +306,31 @@ class WashroomQrGeneratorScreen extends StatefulWidget {
 class _WashroomQrGeneratorScreenState
     extends State<WashroomQrGeneratorScreen> {
   final TextEditingController _controller =
-      TextEditingController(text: 'NAMAZ-ALARM-WASHROOM-001');
+      TextEditingController(text: defaultWashroomQr);
 
-  String _savedCode = 'NAMAZ-ALARM-WASHROOM-001';
-  bool _saving = false;
+  String _qrValue = defaultWashroomQr;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadCode();
-  }
+  Future<void> _saveQr() async {
+    final value = _controller.text.trim();
 
-  Future<void> _loadCode() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('washroom_qr_code');
-
-    if (!mounted || saved == null || saved.isEmpty) return;
-
-    setState(() {
-      _savedCode = saved;
-      _controller.text = saved;
-    });
-  }
-
-  Future<void> _saveCode() async {
-    final code = _controller.text.trim();
-
-    if (code.isEmpty) {
-      _showMessage('Enter a QR code value first.');
+    if (value.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a QR code value.')),
+      );
       return;
     }
 
-    setState(() => _saving = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('washroom_qr_code', value);
 
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('washroom_qr_code', code);
+    setState(() {
+      _qrValue = value;
+    });
 
-      if (!mounted) return;
-
-      setState(() {
-        _savedCode = code;
-        _saving = false;
-      });
-
-      _showMessage('Washroom QR code saved on this device.');
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() => _saving = false);
-      _showMessage('Could not save the QR code.');
-    }
-  }
-
-  Future<void> _shareQr() async {
-    try {
-      final qrPainter = QrPainter(
-        data: _savedCode,
-        version: QrVersions.auto,
-        errorCorrectionLevel: QrErrorCorrectLevel.H,
-      );
-
-      final ui.Image image = await qrPainter.toImage(900);
-      final byteData =
-          await image.toByteData(format: ui.ImageByteFormat.png);
-
-      if (byteData == null) {
-        _showMessage('Could not generate QR image.');
-        return;
-      }
-
-      final Uint8List bytes = byteData.buffer.asUint8List();
-      final directory = await getTemporaryDirectory();
-      final file = File('${directory.path}/namaz_washroom_qr.png');
-
-      await file.writeAsBytes(bytes, flush: true);
-
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'Namaz Alarm washroom QR code',
-      );
-    } catch (e) {
-      _showMessage('Could not share the QR image.');
-    }
-  }
-
-  void _showMessage(String message) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      const SnackBar(content: Text('Washroom QR code saved.')),
     );
   }
 
@@ -389,19 +343,20 @@ class _WashroomQrGeneratorScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: cream,
       appBar: AppBar(title: const Text('Washroom QR Generator')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'Create your washroom QR code',
+            'Create Your Washroom QR',
             style: TextStyle(
               fontSize: 23,
               fontWeight: FontWeight.bold,
-              color: _darkGreen,
+              color: darkGreen,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           TextField(
             controller: _controller,
             decoration: const InputDecoration(
@@ -409,45 +364,27 @@ class _WashroomQrGeneratorScreenState
               border: OutlineInputBorder(),
             ),
           ),
-          const SizedBox(height: 14),
-          FilledButton(
-            onPressed: _saving ? null : _saveCode,
-            style: FilledButton.styleFrom(
-              backgroundColor: _green,
-              foregroundColor: Colors.white,
-            ),
-            child: Text(_saving ? 'Saving...' : 'Save QR Code'),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: _saveQr,
+            child: const Text('Save QR Code'),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 25),
           Center(
             child: Container(
-              color: Colors.white,
               padding: const EdgeInsets.all(16),
+              color: Colors.white,
               child: QrImageView(
-                data: _savedCode,
+                data: _qrValue,
                 version: QrVersions.auto,
                 size: 240,
-                backgroundColor: Colors.white,
-                errorCorrectionLevel: QrErrorCorrectLevel.H,
               ),
             ),
           ),
           const SizedBox(height: 12),
-          Text(
-            'Saved value: $_savedCode',
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: _shareQr,
-            icon: const Icon(Icons.share),
-            label: const Text('Export / Share QR Image'),
-          ),
-          const SizedBox(height: 12),
           const Text(
-            'Print and place the QR code in your washroom. '
-            'A QR code can be photographed or copied.',
-            style: TextStyle(color: Colors.black54),
+            'Print this QR code and place it in your washroom.',
+            textAlign: TextAlign.center,
           ),
         ],
       ),
@@ -455,6 +392,7 @@ class _WashroomQrGeneratorScreenState
   }
 }
 
+// WASHROOM QR SCANNER
 class WashroomQrScannerScreen extends StatefulWidget {
   const WashroomQrScannerScreen({super.key});
 
@@ -465,36 +403,27 @@ class WashroomQrScannerScreen extends StatefulWidget {
 
 class _WashroomQrScannerScreenState
     extends State<WashroomQrScannerScreen> {
-  final MobileScannerController _scanner = MobileScannerController();
-
-  bool _handled = false;
-  String? _message;
+  bool _processing = false;
 
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_handled) return;
+    if (_processing) return;
 
-    final String? value = capture.barcodes
-        .map((barcode) => barcode.rawValue)
-        .firstWhere(
-          (value) => value != null && value.isNotEmpty,
-          orElse: () => null,
-        );
+    final barcodes = capture.barcodes;
 
-    if (value == null) return;
+    for (final barcode in barcodes) {
+      final value = barcode.rawValue;
 
-    _handled = true;
+      if (value == null || value.isEmpty) continue;
 
-    try {
+      _processing = true;
+
       final prefs = await SharedPreferences.getInstance();
-      final expected = prefs.getString('washroom_qr_code');
+      final expected =
+          prefs.getString('washroom_qr_code') ?? defaultWashroomQr;
 
       if (!mounted) return;
 
-      if (expected != null && expected.isNotEmpty && value == expected) {
-        await _scanner.stop();
-
-        if (!mounted) return;
-
+      if (value == expected) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -502,56 +431,37 @@ class _WashroomQrScannerScreenState
           ),
         );
       } else {
-        setState(() {
-          _message = 'QR code does not match the saved washroom code.';
-          _handled = false;
-        });
+        _processing = false;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Incorrect QR code. Scan your washroom QR.'),
+          ),
+        );
       }
-    } catch (e) {
-      if (!mounted) return;
 
-      setState(() {
-        _message = 'Could not verify the QR code.';
-        _handled = false;
-      });
+      return;
     }
-  }
-
-  @override
-  void dispose() {
-    _scanner.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: cream,
       appBar: AppBar(title: const Text('Scan Washroom QR')),
       body: Column(
         children: [
-          Expanded(
-            child: MobileScanner(
-              controller: _scanner,
-              onDetect: _onDetect,
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child: Text(
+              'Go to your washroom and scan the QR code to complete the challenge.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                const Text(
-                  'Point your camera at the washroom QR code.',
-                  textAlign: TextAlign.center,
-                ),
-                if (_message != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _message!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.red),
-                  ),
-                ],
-              ],
+          Expanded(
+            child: MobileScanner(
+              onDetect: _onDetect,
             ),
           ),
         ],
@@ -560,40 +470,56 @@ class _WashroomQrScannerScreenState
   }
 }
 
+// CHALLENGE COMPLETED
 class ChallengeCompleteScreen extends StatelessWidget {
   const ChallengeCompleteScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Challenge Complete')),
+      backgroundColor: cream,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.check_circle, color: _green, size: 90),
+              const Icon(
+                Icons.check_circle,
+                color: green,
+                size: 90,
+              ),
               const SizedBox(height: 20),
               const Text(
-                'Well Done!',
+                'Challenge Completed!',
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
-                  color: _darkGreen,
+                  color: darkGreen,
                 ),
               ),
               const SizedBox(height: 12),
               const Text(
-                'The face check and QR challenge are complete.',
+                'You completed the selfie and washroom QR challenge.',
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-                child: const Text('Finish'),
+              const SizedBox(height: 25),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).popUntil(
+                      (route) => route.isFirst,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: green,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Finish'),
+                ),
               ),
             ],
           ),
