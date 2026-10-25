@@ -13,7 +13,6 @@ import 'package:share_plus/share_plus.dart';
 
 const Color _green = Color(0xFF075442);
 const Color _darkGreen = Color(0xFF063C32);
-const Color _gold = Color(0xFFC5A04A);
 
 class RealFaceDetectionScreen extends StatefulWidget {
   final bool continueToQr;
@@ -32,9 +31,12 @@ class _RealFaceDetectionScreenState
     extends State<RealFaceDetectionScreen> {
   CameraController? _camera;
   FaceDetector? _detector;
+
   bool _initializing = true;
   bool _processing = false;
+  bool _completed = false;
   String? _error;
+
   String _message = 'Position your face inside the camera view.';
 
   @override
@@ -48,12 +50,14 @@ class _RealFaceDetectionScreenState
       final cameras = await availableCameras();
 
       if (cameras.isEmpty) {
-        throw Exception('No camera was found on this device.');
+        throw Exception('No camera found.');
       }
 
       final frontCameras = cameras
-          .where((camera) =>
-              camera.lensDirection == CameraLensDirection.front)
+          .where(
+            (camera) =>
+                camera.lensDirection == CameraLensDirection.front,
+          )
           .toList();
 
       final selectedCamera =
@@ -63,6 +67,7 @@ class _RealFaceDetectionScreenState
         selectedCamera,
         ResolutionPreset.medium,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.nv21,
       );
 
       await controller.initialize();
@@ -73,6 +78,7 @@ class _RealFaceDetectionScreenState
           enableLandmarks: false,
           enableContours: false,
           enableClassification: false,
+          minFaceSize: 0.10,
         ),
       );
 
@@ -82,10 +88,16 @@ class _RealFaceDetectionScreenState
         return;
       }
 
+      _camera = controller;
+      _detector = detector;
+
+      await controller.startImageStream(_processCameraImage);
+
+      if (!mounted) return;
+
       setState(() {
-        _camera = controller;
-        _detector = detector;
         _initializing = false;
+        _message = 'Looking for your face...';
       });
     } catch (e) {
       if (!mounted) return;
@@ -98,62 +110,90 @@ class _RealFaceDetectionScreenState
     }
   }
 
-  Future<void> _detectFace() async {
-    if (_processing || _camera == null || _detector == null) return;
+  Future<void> _processCameraImage(CameraImage image) async {
+    if (_processing || _completed || _detector == null || _camera == null) {
+      return;
+    }
 
-    setState(() {
-      _processing = true;
-      _error = null;
-      _message = 'Checking the captured image...';
-    });
+    _processing = true;
 
     try {
-      final photo = await _camera!.takePicture();
-      final inputImage = InputImage.fromFilePath(photo.path);
-      final faces = await _detector!.processImage(inputImage);
+      final camera = _camera!;
+      final rotation = InputImageRotationValue.fromRawValue(
+        camera.description.sensorOrientation,
+      );
 
-      if (faces.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _message = 'No face detected. Adjust your position and retry.';
-          });
-        }
-        return;
+      if (rotation == null) return;
+
+      final format = InputImageFormatValue.fromRawValue(image.format.raw);
+
+      if (format == null) return;
+
+      final WriteBuffer buffer = WriteBuffer();
+
+      for (final plane in image.planes) {
+        buffer.putUint8List(plane.bytes);
       }
 
-      if (!mounted) return;
+      final bytes = buffer.done().buffer.asUint8List();
 
-      setState(() {
-        _message = 'Face detected successfully!';
-      });
+      final inputImage = InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: Size(
+            image.width.toDouble(),
+            image.height.toDouble(),
+          ),
+          rotation: rotation,
+          format: format,
+          bytesPerRow: image.planes.first.bytesPerRow,
+        ),
+      );
 
-      if (widget.continueToQr) {
-        await Future.delayed(const Duration(milliseconds: 500));
+      final faces = await _detector!.processImage(inputImage);
+
+      if (!mounted || _completed) return;
+
+      if (faces.isNotEmpty) {
+        _completed = true;
+
+        setState(() {
+          _message = 'Face detected successfully!';
+        });
+
+        await _camera!.stopImageStream();
 
         if (!mounted) return;
 
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const WashroomQrScannerScreen(),
-          ),
-        );
+        if (widget.continueToQr) {
+          await Future.delayed(const Duration(milliseconds: 500));
+
+          if (!mounted) return;
+
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const WashroomQrScannerScreen(),
+            ),
+          );
+
+          if (!mounted) return;
+
+          Navigator.of(context).pop(true);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Face detected successfully.')),
+          );
+        }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Face detected successfully.')),
-        );
+        setState(() {
+          _message = 'Looking for your face...';
+        });
       }
     } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _error = 'Face detection failed. Please try again.';
-        _message = 'Check the camera and retry.';
-      });
+      // Continue trying on subsequent camera frames.
     } finally {
-      if (mounted) {
-        setState(() => _processing = false);
-      }
+      _processing = false;
     }
   }
 
@@ -167,11 +207,11 @@ class _RealFaceDetectionScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Face Detection')),
+      appBar: AppBar(title: const Text('Automatic Face Detection')),
       body: SafeArea(
         child: _initializing
             ? const Center(child: CircularProgressIndicator())
-            : _error != null && _camera == null
+            : _error != null
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
@@ -185,11 +225,11 @@ class _RealFaceDetectionScreenState
                     padding: const EdgeInsets.all(20),
                     children: [
                       Container(
-                        height: 360,
+                        height: 380,
                         clipBehavior: Clip.antiAlias,
                         decoration: BoxDecoration(
                           color: Colors.black,
-                          borderRadius: BorderRadius.circular(22),
+                          borderRadius: BorderRadius.circular(24),
                         ),
                         child: _camera != null &&
                                 _camera!.value.isInitialized
@@ -201,47 +241,31 @@ class _RealFaceDetectionScreenState
                                 ),
                               ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24),
+                      Icon(
+                        _completed ? Icons.check_circle : Icons.face,
+                        size: 54,
+                        color: _green,
+                      ),
+                      const SizedBox(height: 12),
                       Text(
                         _message,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 17),
-                      ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          _error!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                      ],
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        height: 54,
-                        child: FilledButton.icon(
-                          onPressed:
-                              _processing ? null : _detectFace,
-                          icon: const Icon(Icons.face),
-                          label: Text(
-                            _processing
-                                ? 'Checking...'
-                                : 'Detect My Face',
-                          ),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: _green,
-                            foregroundColor: Colors.white,
-                          ),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
                       const Text(
-                        'This detects whether a face is present. It does '
-                        'not verify your identity or prove that a live '
-                        'person is in front of the camera.',
+                        'Keep your face clearly visible in the camera. '
+                        'Detection happens automatically. This checks '
+                        'for a face; it does not verify identity or '
+                        'prove that a live person is present.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.black54,
-                          fontSize: 12,
+                          fontSize: 13,
                         ),
                       ),
                     ],
@@ -421,7 +445,7 @@ class _WashroomQrGeneratorScreenState
           const SizedBox(height: 12),
           const Text(
             'Print and place the QR code in your washroom. '
-            'A QR code is not secret: someone could photograph or copy it.',
+            'A QR code can be photographed or copied.',
             style: TextStyle(color: Colors.black54),
           ),
         ],
@@ -440,8 +464,7 @@ class WashroomQrScannerScreen extends StatefulWidget {
 
 class _WashroomQrScannerScreenState
     extends State<WashroomQrScannerScreen> {
-  final MobileScannerController _scanner =
-      MobileScannerController();
+  final MobileScannerController _scanner = MobileScannerController();
 
   bool _handled = false;
   String? _message;
@@ -466,9 +489,7 @@ class _WashroomQrScannerScreenState
 
       if (!mounted) return;
 
-      if (expected != null &&
-          expected.isNotEmpty &&
-          value == expected) {
+      if (expected != null && expected.isNotEmpty && value == expected) {
         await _scanner.stop();
 
         if (!mounted) return;
@@ -481,8 +502,7 @@ class _WashroomQrScannerScreenState
         );
       } else {
         setState(() {
-          _message =
-              'QR code does not match the saved washroom code.';
+          _message = 'QR code does not match the saved washroom code.';
           _handled = false;
         });
       }
@@ -552,11 +572,7 @@ class ChallengeCompleteScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.check_circle,
-                color: _green,
-                size: 90,
-              ),
+              const Icon(Icons.check_circle, color: _green, size: 90),
               const SizedBox(height: 20),
               const Text(
                 'Well Done!',
@@ -574,8 +590,7 @@ class ChallengeCompleteScreen extends StatelessWidget {
               const SizedBox(height: 24),
               FilledButton(
                 onPressed: () {
-                  Navigator.of(context)
-                      .popUntil((route) => route.isFirst);
+                  Navigator.of(context).popUntil((route) => route.isFirst);
                 },
                 child: const Text('Finish'),
               ),
