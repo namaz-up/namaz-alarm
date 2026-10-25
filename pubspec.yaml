@@ -1,6 +1,7 @@
 name: namaz_alarm
-description: Fajr wake up alarm that stops only after face scan and washroom QR scan.
+description: A prayer reminder and wake-up challenge app.
 publish_to: 'none'
+
 version: 1.0.0+1
 
 environment:
@@ -9,20 +10,32 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  alarm: 5.8.0
-  adhan: ^2.0.0
-  camera: ^0.11.0
-  google_mlkit_face_detection: ^0.11.0
-  mobile_scanner: ^5.2.3
-  geolocator: ^13.0.1
-  permission_handler: ^11.3.1
-  shared_preferences: ^2.3.2
-  file_picker: ^8.1.2
-  path_provider: ^2.1.4
+
+  cupertino_icons: ^1.0.8
+
+  # Camera and face detection
+  camera: ^0.11.0+2
+  google_mlkit_face_detection: ^0.13.1
+
+  # QR code generation and scanning
   qr_flutter: ^4.1.0
+  mobile_scanner: ^5.2.3
+
+  # Save settings and QR values
+  shared_preferences: ^2.3.2
+
+  # Export and share QR images
+  path_provider: ^2.1.4
   share_plus: ^10.0.2
+
+  # Permissions
+  permission_handler: ^11.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^4.0.0
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/drum.wav
