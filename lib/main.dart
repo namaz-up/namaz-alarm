@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'real_tools.dart';
 
 void main() {
   runApp(const NamazAlarmApp());
@@ -76,7 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          '☾ Namaz Alarm',
+          'â˜¾ Namaz Alarm',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 25,
@@ -140,7 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.all(18),
       children: [
         const Text(
-          'Assalamu Alaikum 👋',
+          'Assalamu Alaikum ðŸ‘‹',
           style: TextStyle(
             fontSize: 25,
             fontWeight: FontWeight.bold,
@@ -429,31 +430,9 @@ class ToolCard extends StatelessWidget {
   }
 }
 
-class AlarmChallengeScreen extends StatefulWidget {
+
+class AlarmChallengeScreen extends StatelessWidget {
   const AlarmChallengeScreen({super.key});
-
-  @override
-  State<AlarmChallengeScreen> createState() =>
-      _AlarmChallengeScreenState();
-}
-
-class _AlarmChallengeScreenState extends State<AlarmChallengeScreen> {
-  bool faceVerified = false;
-  bool codeAccepted = false;
-
-  final TextEditingController codeController = TextEditingController();
-
-  @override
-  void dispose() {
-    codeController.dispose();
-    super.dispose();
-  }
-
-  void showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -465,245 +444,44 @@ class _AlarmChallengeScreenState extends State<AlarmChallengeScreen> {
         title: const Text('Fajr Wake-up Challenge'),
       ),
       body: SafeArea(
-        child: ListView(
+        child: Padding(
           padding: const EdgeInsets.all(24),
-          children: [
-            const SizedBox(height: 20),
-            const Icon(
-              Icons.notifications_active,
-              color: gold,
-              size: 70,
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              'Time to Wake Up',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 30,
-                fontWeight: FontWeight.bold,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.notifications_active, color: gold, size: 72),
+              const SizedBox(height: 20),
+              const Text('Time to Wake Up',
+                style: TextStyle(color: Colors.white, fontSize: 30, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              const Text('Detect your face, then scan the QR code registered for your washroom.',
+                textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 16)),
+              const SizedBox(height: 28),
+              SizedBox(width: double.infinity, child: FilledButton.icon(
+                onPressed: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => const RealFaceDetectionScreen(continueToQr: true))),
+                icon: const Icon(Icons.face_retouching_natural),
+                label: const Text('Start Face Detection'),
+                style: FilledButton.styleFrom(backgroundColor: gold, foregroundColor: darkGreen, padding: const EdgeInsets.all(16)),
+              )),
+              const SizedBox(height: 14),
+              TextButton(
+                onPressed: () => showDialog(context: context, builder: (ctx) => AlertDialog(
+                  title: const Text('Emergency Exit'),
+                  content: const Text('Use this only if you need to stop the challenge for safety or accessibility reasons.'),
+                  actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                    FilledButton(onPressed: () { Navigator.pop(ctx); Navigator.pop(context); }, child: const Text('Exit'))],
+                )),
+                child: const Text('Emergency Exit', style: TextStyle(color: Colors.white70)),
               ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              'Complete your wake-up challenge to dismiss '
-              'the demonstration alarm.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 16),
-            ),
-            const SizedBox(height: 35),
-
-            // Step 1: Face verification demo
-            challengeCard(
-              number: '1',
-              title: 'Face Verification',
-              description: faceVerified
-                  ? 'Verification demo completed.'
-                  : 'Stand up and look at the camera.',
-              icon: Icons.face_retouching_natural,
-              completed: faceVerified,
-              buttonText: faceVerified
-                  ? 'Verified'
-                  : 'Simulate Face Verification',
-              onPressed: faceVerified
-                  ? null
-                  : () {
-                      setState(() => faceVerified = true);
-                      showMessage(
-                        'Demo verification complete. '
-                        'Real camera detection is not connected yet.',
-                      );
-                    },
-            ),
-
-            const SizedBox(height: 18),
-
-            // Step 2: Washroom code demo
-            challengeCard(
-              number: '2',
-              title: 'Washroom QR Challenge',
-              description: faceVerified
-                  ? 'Enter the demo code displayed in your washroom.'
-                  : 'Complete face verification first.',
-              icon: Icons.qr_code_scanner,
-              completed: codeAccepted,
-              buttonText: codeAccepted
-                  ? 'Code Accepted'
-                  : 'Verify Washroom Code',
-              onPressed: !faceVerified || codeAccepted
-                  ? null
-                  : () {
-                      showDialog(
-                        context: context,
-                        builder: (dialogContext) => AlertDialog(
-                          title: const Text('Washroom Code'),
-                          content: TextField(
-                            controller: codeController,
-                            decoration: const InputDecoration(
-                              hintText: 'Enter your code',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () {
-                                Navigator.pop(dialogContext);
-                              },
-                              child: const Text('Cancel'),
-                            ),
-                            FilledButton(
-                              onPressed: () {
-                                if (codeController.text.trim() ==
-                                    'WASHROOM-001') {
-                                  setState(() => codeAccepted = true);
-                                  Navigator.pop(dialogContext);
-                                  showMessage('Demo code accepted.');
-                                } else {
-                                  showMessage('Incorrect demo code.');
-                                }
-                              },
-                              child: const Text('Verify'),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-            ),
-
-            const SizedBox(height: 28),
-
-            FilledButton.icon(
-              onPressed: codeAccepted
-                  ? () {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Challenge Complete'),
-                          content: const Text(
-                            'You completed the demonstration. '
-                            'You can now prepare for Salah.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () {
-                                Navigator.pop(context);
-                                Navigator.pop(this.context);
-                              },
-                              child: const Text('Finish'),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                  : null,
-              icon: const Icon(Icons.check_circle),
-              label: const Text('Complete Challenge'),
-              style: FilledButton.styleFrom(
-                backgroundColor: gold,
-                foregroundColor: darkGreen,
-                padding: const EdgeInsets.all(17),
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // Always retain an emergency exit in a real implementation.
-            TextButton(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (dialogContext) => AlertDialog(
-                    title: const Text('Emergency Exit'),
-                    content: const Text(
-                      'This demonstration has no active alarm. '
-                      'A production version should always provide '
-                      'an accessible emergency way to stop an alarm.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        child: const Text('Close'),
-                      ),
-                      FilledButton(
-                        onPressed: () {
-                          Navigator.pop(dialogContext);
-                          Navigator.pop(context);
-                        },
-                        child: const Text('Exit Demo'),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              child: const Text(
-                'Emergency Exit',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
-
-  Widget challengeCard({
-    required String number,
-    required String title,
-    required String description,
-    required IconData icon,
-    required bool completed,
-    required String buttonText,
-    required VoidCallback? onPressed,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: const Color(0xFFE2EEE5),
-                child: Icon(icon, color: green),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '$number. $title',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 17,
-                    color: darkGreen,
-                  ),
-                ),
-              ),
-              if (completed)
-                const Icon(Icons.check_circle, color: green),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(description),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: onPressed,
-              style: FilledButton.styleFrom(
-                backgroundColor: green,
-                foregroundColor: Colors.white,
-              ),
-              child: Text(buttonText),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
+
 
 class ToolsScreen extends StatelessWidget {
   const ToolsScreen({super.key});
@@ -711,29 +489,40 @@ class ToolsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tools = [
-      ['Qibla', Icons.explore],
+      ['Face Detection', Icons.face_retouching_natural],
+      ['QR Generator', Icons.qr_code_2],
+      ['QR Scanner', Icons.qr_code_scanner],
       ['Tasbeeh', Icons.fingerprint],
       ['Daily Dua', Icons.menu_book],
       ['Prayer Tracker', Icons.check_circle_outline],
       ['Hijri Calendar', Icons.calendar_month],
-      ['Washroom QR', Icons.qr_code],
     ];
-
     return Scaffold(
       backgroundColor: cream,
       body: GridView.builder(
         padding: const EdgeInsets.all(18),
         itemCount: tools.length,
-        gridDelegate:
-            const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 14,
-          crossAxisSpacing: 14,
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2, mainAxisSpacing: 14, crossAxisSpacing: 14,
         ),
         itemBuilder: (context, index) {
-          return ToolCard(
-            icon: tools[index][1] as IconData,
-            title: tools[index][0] as String,
+          final title = tools[index][0] as String;
+          return InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () {
+              Widget? page;
+              if (title == 'Face Detection') page = const RealFaceDetectionScreen();
+              if (title == 'QR Generator') page = const WashroomQrGeneratorScreen();
+              if (title == 'QR Scanner') page = const WashroomQrScannerScreen();
+              if (page != null) {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => page!));
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$title is not implemented in this build yet.')),
+                );
+              }
+            },
+            child: ToolCard(icon: tools[index][1] as IconData, title: title),
           );
         },
       ),
@@ -779,13 +568,14 @@ class SettingsScreen extends StatelessWidget {
                 title: Text(item[0] as String),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        '${item[0]} settings will be implemented next.',
-                      ),
-                    ),
-                  );
+                  final title = item[0] as String;
+                  if (title == 'Washroom QR Setup') {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const WashroomQrGeneratorScreen()));
+                  } else if (title == 'Face Verification') {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const RealFaceDetectionScreen()));
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title settings are not implemented yet.')));
+                  }
                 },
               ),
             ),
