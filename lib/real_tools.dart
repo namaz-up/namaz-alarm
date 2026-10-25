@@ -13,7 +13,10 @@ const Color cream = Color(0xFFFFFCF4);
 
 const String defaultWashroomQr = 'NAMAZ-ALARM-WASHROOM-001';
 
+// =====================================================
 // LIVE SELFIE SCREEN
+// =====================================================
+
 class RealFaceDetectionScreen extends StatefulWidget {
   final bool continueToQr;
 
@@ -31,8 +34,11 @@ class _RealFaceDetectionScreenState
     extends State<RealFaceDetectionScreen> {
   CameraController? _camera;
   XFile? _selfie;
+
   bool _loading = true;
   bool _takingPhoto = false;
+  bool _openingScanner = false;
+
   String? _error;
 
   @override
@@ -46,7 +52,7 @@ class _RealFaceDetectionScreenState
       final cameras = await availableCameras();
 
       if (cameras.isEmpty) {
-        throw Exception('No camera found on this device.');
+        throw Exception('No camera found.');
       }
 
       CameraDescription selectedCamera = cameras.first;
@@ -74,30 +80,35 @@ class _RealFaceDetectionScreenState
       setState(() {
         _camera = controller;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
         _loading = false;
-        _error = 'Unable to open the camera. Please check camera permission.';
+        _error =
+            'Unable to open the camera. Please check camera permission.';
       });
     }
   }
 
   Future<void> _takeSelfie() async {
-    if (_camera == null ||
-        !_camera!.value.isInitialized ||
+    final camera = _camera;
+
+    if (camera == null ||
+        !camera.value.isInitialized ||
         _takingPhoto) {
       return;
     }
 
     setState(() {
       _takingPhoto = true;
+      _error = null;
     });
 
     try {
-      final photo = await _camera!.takePicture();
+      final photo = await camera.takePicture();
 
       if (!mounted) return;
 
@@ -116,40 +127,66 @@ class _RealFaceDetectionScreenState
   }
 
   Future<void> _retakeSelfie() async {
+    if (_openingScanner) return;
+
     setState(() {
       _selfie = null;
       _error = null;
     });
   }
 
+  // FIX: Release the selfie camera before opening the QR scanner.
   Future<void> _continueToQr() async {
-  if (_selfie == null) return;
+    if (_selfie == null || _openingScanner) return;
 
-  if (!widget.continueToQr) {
-    if (mounted) {
+    if (!widget.continueToQr) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Live selfie captured successfully.'),
         ),
       );
+      return;
     }
-    return;
+
+    setState(() {
+      _openingScanner = true;
+    });
+
+    final oldCamera = _camera;
+    _camera = null;
+
+    try {
+      if (oldCamera != null) {
+        await oldCamera.dispose();
+      }
+
+      if (!mounted) return;
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const WashroomQrScannerScreen(),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open the QR scanner. Please try again.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _openingScanner = false;
+        });
+      }
+    }
   }
 
-  final oldCamera = _camera;
-  _camera = null;
-
-  if (oldCamera != null) {
-    await oldCamera.dispose();
-  }
-
-  if (!mounted) return;
-
-  await Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const WashroomQrScannerScreen(),
-   {
+  @override
+  void dispose() {
     _camera?.dispose();
     super.dispose();
   }
@@ -161,6 +198,7 @@ class _RealFaceDetectionScreenState
       appBar: AppBar(
         title: const Text('Live Selfie'),
         backgroundColor: cream,
+        foregroundColor: darkGreen,
       ),
       body: SafeArea(
         child: Padding(
@@ -182,6 +220,7 @@ class _RealFaceDetectionScreenState
                 style: TextStyle(fontSize: 15),
               ),
               const SizedBox(height: 20),
+
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(24),
@@ -212,7 +251,8 @@ class _RealFaceDetectionScreenState
                                     File(_selfie!.path),
                                     fit: BoxFit.contain,
                                   )
-                                : _camera != null
+                                : _camera != null &&
+                                        _camera!.value.isInitialized
                                     ? CameraPreview(_camera!)
                                     : const Center(
                                         child: Text(
@@ -225,7 +265,9 @@ class _RealFaceDetectionScreenState
                   ),
                 ),
               ),
+
               const SizedBox(height: 20),
+
               if (_selfie == null)
                 SizedBox(
                   width: double.infinity,
@@ -237,7 +279,9 @@ class _RealFaceDetectionScreenState
                             : _takeSelfie,
                     icon: const Icon(Icons.camera_alt),
                     label: Text(
-                      _takingPhoto ? 'Capturing...' : 'Take Live Selfie',
+                      _takingPhoto
+                          ? 'Capturing...'
+                          : 'Take Live Selfie',
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: green,
@@ -259,26 +303,33 @@ class _RealFaceDetectionScreenState
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: _retakeSelfie,
+                        onPressed:
+                            _openingScanner ? null : _retakeSelfie,
                         child: const Text('Retake'),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: _continueToQr,
+                        onPressed:
+                            _openingScanner ? null : _continueToQr,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: green,
                           foregroundColor: Colors.white,
                         ),
                         child: Text(
-                          widget.continueToQr ? 'Scan QR' : 'Finish',
+                          _openingScanner
+                              ? 'Opening Scanner...'
+                              : widget.continueToQr
+                                  ? 'Scan QR'
+                                  : 'Finish',
                         ),
                       ),
                     ),
                   ],
                 ),
               ],
+
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 TextButton(
@@ -300,7 +351,10 @@ class _RealFaceDetectionScreenState
   }
 }
 
+// =====================================================
 // WASHROOM QR GENERATOR
+// =====================================================
+
 class WashroomQrGeneratorScreen extends StatefulWidget {
   const WashroomQrGeneratorScreen({super.key});
 
@@ -321,22 +375,27 @@ class _WashroomQrGeneratorScreenState
 
     if (value.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a QR code value.')),
+        const SnackBar(
+          content: Text('Please enter a QR code value.'),
+        ),
       );
       return;
     }
 
     final prefs = await SharedPreferences.getInstance();
+
     await prefs.setString('washroom_qr_code', value);
+
+    if (!mounted) return;
 
     setState(() {
       _qrValue = value;
     });
 
-    if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Washroom QR code saved.')),
+      const SnackBar(
+        content: Text('Washroom QR code saved.'),
+      ),
     );
   }
 
@@ -350,7 +409,11 @@ class _WashroomQrGeneratorScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: cream,
-      appBar: AppBar(title: const Text('Washroom QR Generator')),
+      appBar: AppBar(
+        title: const Text('Washroom QR Generator'),
+        backgroundColor: cream,
+        foregroundColor: darkGreen,
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -363,6 +426,7 @@ class _WashroomQrGeneratorScreenState
             ),
           ),
           const SizedBox(height: 20),
+
           TextField(
             controller: _controller,
             decoration: const InputDecoration(
@@ -370,12 +434,20 @@ class _WashroomQrGeneratorScreenState
               border: OutlineInputBorder(),
             ),
           ),
+
           const SizedBox(height: 12),
+
           ElevatedButton(
             onPressed: _saveQr,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: green,
+              foregroundColor: Colors.white,
+            ),
             child: const Text('Save QR Code'),
           ),
+
           const SizedBox(height: 25),
+
           Center(
             child: Container(
               padding: const EdgeInsets.all(16),
@@ -387,7 +459,9 @@ class _WashroomQrGeneratorScreenState
               ),
             ),
           ),
+
           const SizedBox(height: 12),
+
           const Text(
             'Print this QR code and place it in your washroom.',
             textAlign: TextAlign.center,
@@ -398,7 +472,10 @@ class _WashroomQrGeneratorScreenState
   }
 }
 
+// =====================================================
 // WASHROOM QR SCANNER
+// =====================================================
+
 class WashroomQrScannerScreen extends StatefulWidget {
   const WashroomQrScannerScreen({super.key});
 
@@ -411,37 +488,60 @@ class _WashroomQrScannerScreenState
     extends State<WashroomQrScannerScreen> {
   bool _processing = false;
 
+  final MobileScannerController _scannerController =
+      MobileScannerController();
+
   Future<void> _onDetect(BarcodeCapture capture) async {
     if (_processing) return;
 
-    final barcodes = capture.barcodes;
-
-    for (final barcode in barcodes) {
+    for (final barcode in capture.barcodes) {
       final value = barcode.rawValue;
 
       if (value == null || value.isEmpty) continue;
 
       _processing = true;
 
-      final prefs = await SharedPreferences.getInstance();
-      final expected =
-          prefs.getString('washroom_qr_code') ?? defaultWashroomQr;
+      try {
+        await _scannerController.stop();
 
-      if (!mounted) return;
+        final prefs = await SharedPreferences.getInstance();
 
-      if (value == expected) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => const ChallengeCompleteScreen(),
-          ),
-        );
-      } else {
+        final expected =
+            prefs.getString('washroom_qr_code') ??
+                defaultWashroomQr;
+
+        if (!mounted) return;
+
+        if (value == expected) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const ChallengeCompleteScreen(),
+            ),
+          );
+        } else {
+          _processing = false;
+
+          await _scannerController.start();
+
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Incorrect QR code. Scan your washroom QR.',
+              ),
+            ),
+          );
+        }
+      } catch (e) {
         _processing = false;
+
+        if (!mounted) return;
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Incorrect QR code. Scan your washroom QR.'),
+            content: Text('Scanner error. Please try again.'),
           ),
         );
       }
@@ -451,10 +551,20 @@ class _WashroomQrScannerScreenState
   }
 
   @override
+  void dispose() {
+    _scannerController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: cream,
-      appBar: AppBar(title: const Text('Scan Washroom QR')),
+      appBar: AppBar(
+        title: const Text('Scan Washroom QR'),
+        backgroundColor: cream,
+        foregroundColor: darkGreen,
+      ),
       body: Column(
         children: [
           const Padding(
@@ -465,8 +575,10 @@ class _WashroomQrScannerScreenState
               style: TextStyle(fontSize: 16),
             ),
           ),
+
           Expanded(
             child: MobileScanner(
+              controller: _scannerController,
               onDetect: _onDetect,
             ),
           ),
@@ -476,7 +588,10 @@ class _WashroomQrScannerScreenState
   }
 }
 
+// =====================================================
 // CHALLENGE COMPLETED
+// =====================================================
+
 class ChallengeCompleteScreen extends StatelessWidget {
   const ChallengeCompleteScreen({super.key});
 
@@ -495,7 +610,9 @@ class ChallengeCompleteScreen extends StatelessWidget {
                 color: green,
                 size: 90,
               ),
+
               const SizedBox(height: 20),
+
               const Text(
                 'Challenge Completed!',
                 textAlign: TextAlign.center,
@@ -505,12 +622,16 @@ class ChallengeCompleteScreen extends StatelessWidget {
                   color: darkGreen,
                 ),
               ),
+
               const SizedBox(height: 12),
+
               const Text(
                 'You completed the selfie and washroom QR challenge.',
                 textAlign: TextAlign.center,
               ),
+
               const SizedBox(height: 25),
+
               SizedBox(
                 width: double.infinity,
                 height: 52,
