@@ -123,27 +123,33 @@ class _RealFaceDetectionScreenState
   }
 
   Future<void> _continueToQr() async {
-    if (_selfie == null) return;
+  if (_selfie == null) return;
 
-    if (!widget.continueToQr) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Live selfie captured successfully.')),
-        );
-      }
-      return;
+  if (!widget.continueToQr) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Live selfie captured successfully.'),
+        ),
+      );
     }
-
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const WashroomQrScannerScreen(),
-      ),
-    );
+    return;
   }
 
-  @override
-  void dispose() {
+  final oldCamera = _camera;
+  _camera = null;
+
+  if (oldCamera != null) {
+    await oldCamera.dispose();
+  }
+
+  if (!mounted) return;
+
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => const WashroomQrScannerScreen(),
+   {
     _camera?.dispose();
     super.dispose();
   }
